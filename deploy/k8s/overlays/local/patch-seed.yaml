@@ -1,0 +1,7 @@
+# Override just the seed size for local runs (strategic-merge patch onto the base ConfigMap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  SEED_CUSTOMERS: "200"

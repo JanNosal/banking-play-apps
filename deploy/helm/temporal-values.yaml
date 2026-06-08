@@ -1,0 +1,31 @@
+# Production-grade alternative to deploy/k8s/base/temporal.yaml: install Temporal from the official
+# Helm chart instead of the single auto-setup Pod. Use this when you want a realistic Temporal topology
+# (separate frontend/history/matching/worker services) closer to what you'd run on AKS.
+#
+#   helm repo add temporal https://go.temporal.io/helm-charts
+#   helm install temporal temporal/temporal -n bank --create-namespace -f deploy/helm/temporal-values.yaml
+#
+# Then point the worker at the chart's frontend service by editing app-config:
+#   TEMPORAL_TARGET: "temporal-frontend:7233"
+# and REMOVE temporal.yaml from deploy/k8s/base/kustomization.yaml so the two don't collide.
+
+# Use the bundled PostgreSQL (default chart uses Cassandra; Postgres is lighter for learning).
+server:
+  replicaCount: 1
+
+cassandra:
+  enabled: false
+
+postgresql:
+  enabled: true
+
+# Keep the dependencies light for a laptop.
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+elasticsearch:
+  enabled: false
+
+web:
+  enabled: true        # Temporal UI

@@ -1,0 +1,53 @@
+# Single-node MongoDB holding both databases (legacy_inventory + new_inventory), like the compose stack.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  labels: { app: mongo }
+spec:
+  selector: { app: mongo }
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels: { app: mongo }
+  template:
+    metadata:
+      labels: { app: mongo }
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+          readinessProbe:
+            tcpSocket: { port: 27017 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 27017 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

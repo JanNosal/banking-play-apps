@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.jannosal.bank</groupId>
+        <artifactId>bank-migration-parent</artifactId>
+        <version>0.0.1</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>product-model</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Banking Playground :: Product Model</name>
+    <description>
+        Plain Java records modelling a bank Product (a customer holding/arrangement — account, card,
+        overdraft, loan) and its references. No Spring, no persistence — only Jackson annotations so
+        the same records serialize to canonical JSON (with @type / @baseType / @referredType) and
+        deserialize legacy payloads leniently. Shared by both REST services, the worker and the tests.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All objects land in the `bank` namespace and carry a shared label.
+namespace: bank
+commonLabels:
+  app.kubernetes.io/part-of: bank-playground
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - mongo.yaml
+  - temporal.yaml
+  - mocked-apps.yaml
+  - product-inventory-service.yaml
+  - migration-worker.yaml
+  - ingress.yaml
+
+# Repin image tags here if you build new versions, e.g.:
+# images:
+#   - name: bank/mocked-apps
+#     newTag: 0.0.2

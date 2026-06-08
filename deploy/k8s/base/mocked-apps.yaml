@@ -1,0 +1,59 @@
+# Legacy/source core — seeds the directory and serves it. Image built by `docker compose build`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mocked-apps
+  labels: { app: mocked-apps }
+spec:
+  selector: { app: mocked-apps }
+  ports:
+    - { name: http, port: 8085, targetPort: 8085 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mocked-apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mocked-apps }
+  template:
+    metadata:
+      labels: { app: mocked-apps }
+    spec:
+      initContainers:
+        - name: wait-for-mongo
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z mongo 27017; do echo waiting for mongo; sleep 2; done"]
+      containers:
+        - name: mocked-apps
+          image: bank/mocked-apps:0.0.1
+          imagePullPolicy: IfNotPresent           # use the locally-built image, never pull
+          ports:
+            - containerPort: 8085
+          env:
+            - { name: SERVER_PORT, value: "8085" }
+            - name: MONGODB_URI
+              valueFrom: { configMapKeyRef: { name: app-config, key: LEGACY_MONGODB_URI } }
+            - name: SEED_ENABLED
+              valueFrom: { configMapKeyRef: { name: app-config, key: SEED_ENABLED } }
+            - name: SEED_RESET
+              valueFrom: { configMapKeyRef: { name: app-config, key: SEED_RESET } }
+            - name: SEED_CUSTOMERS
+              valueFrom: { configMapKeyRef: { name: app-config, key: SEED_CUSTOMERS } }
+            - name: SEED_RANDOM_SEED
+              valueFrom: { configMapKeyRef: { name: app-config, key: SEED_RANDOM_SEED } }
+          startupProbe:                            # Spring Boot 4 + JVM: allow up to ~150s to come up
+            httpGet: { path: /actuator/health, port: 8085 }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "768Mi" }

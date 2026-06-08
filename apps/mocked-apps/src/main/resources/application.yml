@@ -1,0 +1,34 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: mocked-apps
+  # Spring Boot 4 reads the connection from spring.mongodb.uri (the old spring.data.mongodb.uri is
+  # gone); auto-index-creation remains a Spring Data property under spring.data.mongodb.
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/legacy_inventory?directConnection=true}
+  data:
+    mongodb:
+      auto-index-creation: true
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# Dataset generation. Disabled by default; the docker stack enables a large dataset and the
+# end-to-end test enables a tiny, deterministic one. See SeedProperties.
+seed:
+  enabled: ${SEED_ENABLED:false}
+  reset: ${SEED_RESET:true}
+  customers: ${SEED_CUSTOMERS:1500}
+  random-seed: ${SEED_RANDOM_SEED:42}
+  batch-size: 2000

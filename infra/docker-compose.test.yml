@@ -1,0 +1,23 @@
+# =============================================================================
+# Test override for the dockerised end-to-end test (DockerisedStackE2EIT).
+# Layered on top of ../docker-compose.yml:
+#   - tiny, deterministic legacy dataset (fast, reproducible exact-count assertions)
+#   - discovery runs exactly ONE pass (MAX_PASSES=1) instead of the endless production loop;
+#     the loader still runs forever and is stopped by the test via POST /migration/stop.
+# Usage (compose): docker compose -f docker-compose.yml -f infra/docker-compose.test.yml up
+# The E2E test loads both files via Testcontainers ComposeContainer.
+# =============================================================================
+name: bank-migration
+
+services:
+  mocked-apps:
+    environment:
+      SEED_ENABLED: "true"
+      SEED_RESET: "true"
+      SEED_CUSTOMERS: "40"
+      SEED_RANDOM_SEED: "7"
+
+  migration-worker:
+    environment:
+      AUTO_START: "true"
+      MAX_PASSES: "1"

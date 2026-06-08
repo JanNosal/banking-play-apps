@@ -1,0 +1,39 @@
+server:
+  port: ${SERVER_PORT:8087}
+
+spring:
+  application:
+    name: migration-worker
+  threads:
+    virtual:
+      enabled: true
+  temporal:
+    connection:
+      target: ${TEMPORAL_TARGET:localhost:7233}
+    namespace: ${TEMPORAL_NAMESPACE:default}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+migration:
+  legacy-base-url: ${LEGACY_BASE_URL:http://localhost:8085}
+  inventory-base-url: ${INVENTORY_BASE_URL:http://localhost:8086}
+  product-directory-reference: ${PRODUCT_DIRECTORY_REFERENCE:PD-PREMIER-BANKING}
+  task-queue: product-migration
+  loader-workflow-id: customer-loader-main
+  discovery-workflow-id: discovery-main
+  discovery-page-size: 200
+  loader-page-size: 100
+  max-concurrency: 16
+  # Production defaults: endless re-scanning loop, never drain-and-exit.
+  max-passes: ${MAX_PASSES:-1}
+  inter-pass-sleep-seconds: 30
+  continue-as-new-after: 500
+  drain-and-exit: false
+  auto-start: ${AUTO_START:false}

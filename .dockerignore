@@ -1,0 +1,9 @@
+# Keep the image build hermetic: build only from source inside the build stage,
+# never copy host build output (stale jars across versions break the COPY glob)
+# or local IDE/VCS cruft into the context.
+**/target/
+.git/
+.idea/
+*.iml
+.DS_Store
+*.log

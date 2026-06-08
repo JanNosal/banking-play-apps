@@ -1,0 +1,51 @@
+# Modern/target core — idempotent upsert sink for the migration. Image built by `docker compose build`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-inventory-service
+  labels: { app: product-inventory-service }
+spec:
+  selector: { app: product-inventory-service }
+  ports:
+    - { name: http, port: 8086, targetPort: 8086 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-inventory-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: product-inventory-service }
+  template:
+    metadata:
+      labels: { app: product-inventory-service }
+    spec:
+      initContainers:
+        - name: wait-for-mongo
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z mongo 27017; do echo waiting for mongo; sleep 2; done"]
+      containers:
+        - name: product-inventory-service
+          image: bank/product-inventory-service:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8086
+          env:
+            - { name: SERVER_PORT, value: "8086" }
+            - name: MONGODB_URI
+              valueFrom: { configMapKeyRef: { name: app-config, key: NEW_MONGODB_URI } }
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8086 }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8086 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8086 }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "768Mi" }

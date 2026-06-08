@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.jannosal.bank</groupId>
+        <artifactId>bank-migration-parent</artifactId>
+        <version>0.0.1</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>e2e-tests</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <docker.api.version>1.43</docker.api.version>
+    </properties>
+
+    <name>Banking Playground :: End-to-End Tests</name>
+    <description>
+        Black-box end-to-end test: real MongoDB (Testcontainers), both Spring Boot services booted
+        in-JVM on random ports, and the real workflows driven by Temporal's TestWorkflowEnvironment.
+        Seeds a small deterministic dataset, runs the migration experiment to completion under a hard
+        timeout, and asserts the new directory is byte-for-byte equal to the migrated subset of the
+        legacy one.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.jannosal.bank</groupId>
+            <artifactId>product-model</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.jannosal.bank</groupId>
+            <artifactId>mocked-apps</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.jannosal.bank</groupId>
+            <artifactId>product-inventory-service</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.jannosal.bank</groupId>
+            <artifactId>migration-worker</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers 2.0 renamed modules to testcontainers-<name>. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-mongodb</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- The end-to-end test is named *IT and runs in the integration-test phase via failsafe,
+                 gated by the `it` profile (skipITs). It needs Docker for Testcontainers. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <!-- Hint for the docker-java client API version. Note: Testcontainers 2.0's
+                             bundled docker-java may ignore this and require Docker server API >= 1.44
+                             (Docker 25+). On older Docker, run against an external MongoDB instead via
+                             -De2e.mongo.uri=mongodb://localhost:27018 (see the README). -->
+                        <DOCKER_API_VERSION>${docker.api.version}</DOCKER_API_VERSION>
+                    </environmentVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

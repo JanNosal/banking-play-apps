@@ -1,0 +1,159 @@
+# =============================================================================
+# Banking Playground — local orchestration
+# =============================================================================
+# One stack with everything needed to run the migration end to end:
+#   mongo                       — single MongoDB holding two databases
+#                                 (legacy_inventory + new_inventory)
+#   temporal-postgresql         — Temporal's backing store
+#   temporal                    — Temporal server (gRPC :7234 on host)
+#   temporal-ui                 — Temporal Web UI (http://localhost:8234)
+#   mocked-apps                 — mocked legacy product inventory + seeded data  :8085
+#   product-inventory-service   — modern product inventory (target)              :8086
+#   migration-worker            — Temporal worker running both workflows         :8087
+#
+# Usage:
+#   docker compose up -d --build
+#   open http://localhost:8234            # Temporal UI — watch the workflows
+#   curl http://localhost:8087/migration/status
+#   curl http://localhost:8086/customer-product-and-service-directory/stats
+# =============================================================================
+
+name: bank-migration
+
+networks:
+  bank:
+    driver: bridge
+
+volumes:
+  migration-mongo-data:
+  migration-temporal-pg-data:
+
+services:
+  mongo:
+    image: mongo:7.0
+    networks: [bank]
+    ports:
+      - "27018:27017"
+    volumes:
+      - migration-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  temporal-postgresql:
+    image: postgres:16.6
+    networks: [bank]
+    volumes:
+      - migration-temporal-pg-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    networks: [bank]
+    ports:
+      - "7234:7233"
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: temporal-postgresql
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 7d
+      TEMPORAL_ADDRESS: temporal:7233
+    healthcheck:
+      test: ["CMD", "temporal", "workflow", "list", "--namespace", "default", "--address", "temporal:7233"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  temporal-ui:
+    image: temporalio/ui:2.32.0
+    networks: [bank]
+    ports:
+      - "8234:8233"
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:8234"
+      TEMPORAL_UI_PORT: "8233"
+
+  mocked-apps:
+    build:
+      context: .
+      dockerfile: infra/app.Dockerfile
+      args:
+        APP: mocked-apps
+    image: bank/mocked-apps:0.0.1
+    networks: [bank]
+    ports:
+      - "8085:8085"
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017/legacy_inventory?directConnection=true"
+      # Seed a large, realistic legacy dataset on first boot (>10k products).
+      SEED_ENABLED: "true"
+      SEED_RESET: "true"
+      SEED_CUSTOMERS: "1500"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  product-inventory-service:
+    build:
+      context: .
+      dockerfile: infra/app.Dockerfile
+      args:
+        APP: product-inventory-service
+    image: bank/product-inventory-service:0.0.1
+    networks: [bank]
+    ports:
+      - "8086:8086"
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017/new_inventory?directConnection=true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  migration-worker:
+    build:
+      context: .
+      dockerfile: infra/app.Dockerfile
+      args:
+        APP: migration-worker
+    image: bank/migration-worker:0.0.1
+    networks: [bank]
+    ports:
+      - "8087:8087"
+    environment:
+      TEMPORAL_TARGET: "temporal:7233"
+      LEGACY_BASE_URL: "http://mocked-apps:8085"
+      INVENTORY_BASE_URL: "http://product-inventory-service:8086"
+      PRODUCT_DIRECTORY_REFERENCE: "PD-PREMIER-BANKING"
+      # Start the endless production migration on boot (-1 = re-scan forever).
+      AUTO_START: "true"
+      MAX_PASSES: "-1"
+    depends_on:
+      temporal:
+        condition: service_healthy
+      mocked-apps:
+        condition: service_started
+      product-inventory-service:
+        condition: service_started

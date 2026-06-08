@@ -1,0 +1,137 @@
+# Temporal server (auto-setup) + its Postgres backing store + the Web UI — mirrors docker-compose.yml.
+# This self-contained set is the simplest local option. For a production-grade install use the official
+# temporalio/helm-charts instead (see deploy/helm/temporal-values.yaml).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-postgresql
+  labels: { app: temporal-postgresql }
+spec:
+  selector: { app: temporal-postgresql }
+  ports:
+    - { name: pg, port: 5432, targetPort: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: temporal-postgresql
+spec:
+  serviceName: temporal-postgresql
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal-postgresql }
+  template:
+    metadata:
+      labels: { app: temporal-postgresql }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.6
+          env:
+            - { name: POSTGRES_USER, value: temporal }
+            - { name: POSTGRES_PASSWORD, value: temporal }
+            - { name: POSTGRES_DB, value: temporal }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "temporal", "-d", "temporal"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  labels: { app: temporal }
+spec:
+  selector: { app: temporal }
+  ports:
+    - { name: grpc, port: 7233, targetPort: 7233 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal }
+  template:
+    metadata:
+      labels: { app: temporal }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z temporal-postgresql 5432; do echo waiting for postgres; sleep 2; done"]
+      containers:
+        - name: temporal
+          image: temporalio/auto-setup:1.27.2
+          env:
+            - { name: DB, value: postgres12 }
+            - { name: DB_PORT, value: "5432" }
+            - { name: POSTGRES_SEEDS, value: temporal-postgresql }
+            - { name: POSTGRES_USER, value: temporal }
+            - { name: POSTGRES_PWD, value: temporal }
+            - { name: DEFAULT_NAMESPACE, value: default }
+            - { name: DEFAULT_NAMESPACE_RETENTION, value: 7d }
+            - { name: TEMPORAL_ADDRESS, value: "temporal:7233" }
+          ports:
+            - containerPort: 7233
+          readinessProbe:
+            tcpSocket: { port: 7233 }
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "200m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  labels: { app: temporal-ui }
+spec:
+  selector: { app: temporal-ui }
+  ports:
+    - { name: http, port: 8233, targetPort: 8233 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal-ui }
+  template:
+    metadata:
+      labels: { app: temporal-ui }
+    spec:
+      containers:
+        - name: temporal-ui
+          image: temporalio/ui:2.32.0
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal:7233" }
+            - { name: TEMPORAL_UI_PORT, value: "8233" }
+          ports:
+            - containerPort: 8233
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }

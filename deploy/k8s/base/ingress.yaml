@@ -1,0 +1,28 @@
+# Optional host-based ingress (needs an ingress controller, e.g. ingress-nginx). The two cores share the
+# same URL paths, so routing must be by host, not path. *.localhost resolves to 127.0.0.1 on most setups.
+# No controller? Use `kubectl port-forward` instead (see deploy/README.md) — that needs nothing extra.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bank
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: legacy.bank.localhost
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: mocked-apps, port: { number: 8085 } } } }
+    - host: inventory.bank.localhost
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: product-inventory-service, port: { number: 8086 } } } }
+    - host: worker.bank.localhost
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: migration-worker, port: { number: 8087 } } } }
+    - host: temporal.bank.localhost
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: temporal-ui, port: { number: 8233 } } } }

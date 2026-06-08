@@ -1,0 +1,25 @@
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  application:
+    name: product-inventory-service
+  # Spring Boot 4 reads the connection from spring.mongodb.uri (the old spring.data.mongodb.uri is
+  # gone); auto-index-creation remains a Spring Data property under spring.data.mongodb.
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/new_inventory?directConnection=true}
+  data:
+    mongodb:
+      auto-index-creation: true
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

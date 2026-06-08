@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.jannosal.bank</groupId>
+    <artifactId>bank-migration-parent</artifactId>
+    <version>0.0.1</version>
+    <packaging>pom</packaging>
+
+    <name>Banking Playground :: Parent</name>
+    <description>
+        An EXPERIMENTAL personal learning sandbox (not production code, not banking advice) for poking
+        at an event-driven banking stack — Spring Boot, MongoDB, Temporal, Testcontainers — on a BIAN
+        Customer Product and Service Directory domain model. A general playground rather than a single
+        project; it grows whatever experiment is interesting at the time. The first experiment is a
+        Temporal-orchestrated directory migration: two REST services (a mock of the legacy directory
+        holding seeded, randomly generated data, and the modern target) plus a worker running a
+        discovery workflow that scans the legacy directory by product-directory reference and streams
+        distinct customer ids to a long-running loader workflow, which fetches each customer's full
+        directory and upserts every entry into the new one. Spring Boot is imported as a BOM (no
+        spring-boot-starter-parent) so the plain model library is not coupled to the Spring Boot
+        lifecycle.
+    </description>
+
+    <modules>
+        <module>libs/product-model</module>
+        <module>apps/mocked-apps</module>
+        <module>apps/product-inventory-service</module>
+        <module>apps/migration-worker</module>
+        <module>e2e-tests</module>
+    </modules>
+
+    <properties>
+        <java.version>25</java.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <!-- Keep parameter names in bytecode (Spring MVC @RequestParam/@PathVariable rely on them).
+             Needed because we don't inherit spring-boot-starter-parent, which sets this for you. -->
+        <maven.compiler.parameters>true</maven.compiler.parameters>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Testcontainers-based end-to-end tests (*IT) require Docker, so they are SKIPPED by
+             default. Enable with the `it` profile: ./mvnw verify -Pit (needs Docker). -->
+        <skipITs>true</skipITs>
+
+        <spring-boot.version>4.0.0</spring-boot.version>
+        <temporal.version>1.31.0</temporal.version>
+        <testcontainers.version>2.0.2</testcontainers.version>
+
+        <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.4</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.5.4</maven-failsafe-plugin.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.temporal</groupId>
+                <artifactId>temporal-bom</artifactId>
+                <version>${temporal.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Internal modules -->
+            <dependency>
+                <groupId>dev.jannosal.bank</groupId>
+                <artifactId>product-model</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.jannosal.bank</groupId>
+                <artifactId>mocked-apps</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.jannosal.bank</groupId>
+                <artifactId>product-inventory-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.jannosal.bank</groupId>
+                <artifactId>migration-worker</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven-compiler-plugin.version}</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                        <!-- Required because we do NOT use spring-boot-starter-parent: keep method
+                             parameter names in the bytecode so Spring MVC can resolve @RequestParam /
+                             @PathVariable without an explicit name on every argument. -->
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${maven-failsafe-plugin.version}</version>
+                    <configuration>
+                        <skipITs>${skipITs}</skipITs>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <!-- Run the Testcontainers end-to-end tests: ./mvnw verify -Pit -->
+        <profile>
+            <id>it</id>
+            <properties>
+                <skipITs>false</skipITs>
+            </properties>
+        </profile>
+    </profiles>
+
+</project>

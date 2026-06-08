@@ -1,0 +1,67 @@
+# Temporal worker — auto-starts the migration on boot. Waits for Temporal + both cores first.
+apiVersion: v1
+kind: Service
+metadata:
+  name: migration-worker
+  labels: { app: migration-worker }
+spec:
+  selector: { app: migration-worker }
+  ports:
+    - { name: http, port: 8087, targetPort: 8087 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: migration-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: migration-worker }
+  template:
+    metadata:
+      labels: { app: migration-worker }
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z temporal 7233; do echo waiting for temporal; sleep 2; done
+              until nc -z mocked-apps 8085; do echo waiting for mocked-apps; sleep 2; done
+              until nc -z product-inventory-service 8086; do echo waiting for inventory; sleep 2; done
+      containers:
+        - name: migration-worker
+          image: bank/migration-worker:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8087
+          env:
+            - { name: SERVER_PORT, value: "8087" }
+            - name: TEMPORAL_TARGET
+              valueFrom: { configMapKeyRef: { name: app-config, key: TEMPORAL_TARGET } }
+            - name: LEGACY_BASE_URL
+              valueFrom: { configMapKeyRef: { name: app-config, key: LEGACY_BASE_URL } }
+            - name: INVENTORY_BASE_URL
+              valueFrom: { configMapKeyRef: { name: app-config, key: INVENTORY_BASE_URL } }
+            - name: PRODUCT_DIRECTORY_REFERENCE
+              valueFrom: { configMapKeyRef: { name: app-config, key: PRODUCT_DIRECTORY_REFERENCE } }
+            - name: AUTO_START
+              valueFrom: { configMapKeyRef: { name: app-config, key: AUTO_START } }
+            - name: MAX_PASSES
+              valueFrom: { configMapKeyRef: { name: app-config, key: MAX_PASSES } }
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "768Mi" }

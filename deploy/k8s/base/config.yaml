@@ -1,0 +1,22 @@
+# Non-secret configuration shared by the apps. Mirrors the env vars in docker-compose.yml.
+# A standalone MongoDB with no auth is used (same as compose) — in a real cluster you would move
+# credentials into a Secret / Key Vault. directConnection=true is required for a single-node mongo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LEGACY_MONGODB_URI: "mongodb://mongo:27017/legacy_inventory?directConnection=true"
+  NEW_MONGODB_URI: "mongodb://mongo:27017/new_inventory?directConnection=true"
+  TEMPORAL_TARGET: "temporal:7233"
+  LEGACY_BASE_URL: "http://mocked-apps:8085"
+  INVENTORY_BASE_URL: "http://product-inventory-service:8086"
+  PRODUCT_DIRECTORY_REFERENCE: "PD-PREMIER-BANKING"
+  # Seeding (legacy core). Lower SEED_CUSTOMERS in the local overlay for a fast first run.
+  SEED_ENABLED: "true"
+  SEED_RESET: "true"
+  SEED_CUSTOMERS: "1500"
+  SEED_RANDOM_SEED: "42"
+  # Migration worker: endless re-scan, auto-started on boot (same as the docker stack).
+  AUTO_START: "true"
+  MAX_PASSES: "-1"
