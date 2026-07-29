@@ -47,6 +47,7 @@ payload, so nothing has to translate between layers.
 6. [Data seeding](data-seeding.md)
 7. [Configuration](configuration.md)
 8. [Observability & control plane](observability.md)
+9. [Per-key event serialization](per-key-event-serialization.md) — reusable pattern, not implemented here.
 
 ## See also
 
