@@ -77,7 +77,8 @@ producer ──► resolve key ──► signalWithStart("agg-" + key, event)
                         └──────────────────────────────────┘
 ```
 
-Two moving parts: whatever already consumes your events, and one workflow type.
+Two moving parts: whatever already consumes your events, and one workflow type. A third appears only if
+resolving the key has side effects — see [the variant below](#variant-when-resolving-the-key-has-side-effects).
 
 ### 1. Resolve the key at the edge, then `signalWithStart`
 
@@ -107,9 +108,9 @@ Always `signalWithStart` — never "check if running, then start or signal". Tha
 Acknowledge the source message (commit the Kafka offset, ack the queue) **only after this call returns**,
 so a failure means redelivery rather than a lost event.
 
-> If the lookup is unreachable from the producer — no DB access, or you refuse to block a consumer poll
-> loop on a query — put it in an activity inside a tiny one-shot workflow that resolves and forwards.
-> That's a deployment constraint, not a change to the pattern.
+This is the right shape when resolution is a **pure read** the producer can perform. When it isn't — the
+producer can't reach the mapping store, or resolving also means repairing data elsewhere — use the
+[intake workflow variant](#variant-when-resolving-the-key-has-side-effects) instead.
 
 ### 2. The signal handler only buffers
 
@@ -188,6 +189,78 @@ Each pass through `drain()`:
 **Lifetime**: open while waiting on the deadline, closed once the outcome is settled. A later event on a
 settled aggregate starts a fresh run that reloads from the database — which is why persistence is not
 optional.
+
+## Variant: when resolving the key has side effects
+
+Resolution is often not a read. A common case: the event arrives without the key, the mapping store says
+it *should* have one, and the upstream record therefore needs **correcting in another system** before
+anything else happens. Resolution is then read → remote write → forward, a multi-step process with an
+external side effect.
+
+Don't put that in the consumer. A crash between the repair and the signal leaves the remote data changed
+with nothing recording it and nothing retrying the forward, and a slow or unavailable remote system
+becomes a stalled poll loop. Put it in a one-shot **intake workflow**:
+
+```
+producer ──► IntakeWorkflow ──► AggregateWorkflow
+             id: intake-<eventId>   id: agg-<key>
+             resolve → repair → signal
+```
+
+```java
+@WorkflowMethod
+public void intake(MemberEvent event) {
+    String key = event.getAggregateKey();
+
+    if (key == null) {
+        key = activities.resolveKey(event.getAccountId(), event.getMemberId());
+        if (key == null) {
+            activities.handleUnaffiliated(event);            // genuinely not part of an aggregate
+            return;
+        }
+        activities.repairUpstreamRecord(event.getMemberId(), key);   // the external write
+    }
+
+    activities.signalAggregate(key, event);                  // holds a WorkflowClient
+}
+```
+
+Started from the producer with a deterministic id, exactly as the aggregate workflow is:
+
+```java
+WorkflowOptions.newBuilder()
+        .setTaskQueue(TASK_QUEUE)
+        .setWorkflowId("intake-" + eventId)        // topic-partition-offset, or the event's own id
+        .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE)
+        .build();
+```
+
+Four rules specific to this variant:
+
+**a. The intake id must be deterministic.** Derived from the event, with `REJECT_DUPLICATE`. Otherwise a
+redelivered message re-runs the repair.
+
+**b. The repair must be idempotent on its own.** Rule (a) only dedups within your namespace retention
+window, and activity retries can re-issue the call regardless. Prefer a compare-and-set on the remote
+side — "set the reference if it is currently empty" — over a blind write, or pass an idempotency key.
+
+**c. Repair before signalling.** If downstream work reads the data you're fixing, signalling first lets
+the aggregate act on data you already know is wrong. A slow repair is indistinguishable from a genuinely
+late event, and the deadline runs from the first member either way, so the delay costs nothing.
+
+**d. Signal through an activity.** `Workflow.newExternalWorkflowStub` only signals a workflow that
+already exists, and there is no signal-with-start for external workflows from inside workflow code. So
+the final hop is an activity holding a `WorkflowClient`. Its retries can deliver the same signal twice —
+which is why the per-member version guard in rule 5 below is mandatory, not optional.
+
+> **Where the repair belongs depends on what it writes.** A **per-member** repair ("this record is
+> missing its aggregate reference") is safe in intake — concurrent members touch different rows. An
+> **aggregate-level** repair is not: two members arriving together would race in the remote system, a
+> second race sitting outside your mutex. Move that repair inside the aggregate workflow, where it is
+> serialized along with everything else.
+
+Note that none of this touches the aggregate workflow. The mutex, the drain loop, and the deadline are
+unchanged — only the path into them grows.
 
 ## Rules you cannot break
 
