@@ -31,9 +31,16 @@ The pattern fits when all of these are true:
 Gaps between events can be arbitrary — seconds or months. That's the case that breaks naive designs and
 the one this handles directly.
 
+One optional trait changes the recommended shape below:
+
+- The decision is **not the end** — the aggregate stays monitored after the deadline, and a later
+  change (a required member disappearing) can still revoke the effect, however long after the window
+  it happens.
+
 Worked example used throughout: members belong to an aggregate; an **effect** is applied when the first
 member appears; the aggregate is **complete** when every required member is present; if it doesn't
-complete within 60 days the effect is reverted. Substitute your own nouns — the mechanics don't change.
+complete within 60 days the effect is reverted — and even a kept effect is revoked if a required member
+later disappears. Substitute your own nouns — the mechanics don't change.
 
 ## The core idea
 
@@ -77,6 +84,18 @@ workflow task fails visibly and recovers once you ship a fix. Nothing is lost.
 
 Move the deadline out only if you deploy the worker frequently and won't adopt worker versioning. The
 trade you make is a loud, recoverable failure mode for a **silent** one.
+
+**Post-deadline monitoring flips this default.** If the aggregate must keep reacting to events *after*
+the deadline settles — a kept effect can still be revoked when a required member later disappears — then
+the closed-run path (event → fresh run → reload → decide) is the workflow's permanent mode of operation
+anyway. Keeping the deadline inside buys uniformity only for the window itself while still charging the
+full versioning tax on parked runs. Prefer the
+[timer-workflow variant](#alternative-move-the-deadline-into-a-timer-workflow): every run becomes
+short-lived, the reload path is the *only* path (one mode to reason about and test instead of two), and
+rule 12 effectively stops applying because no run outlives a deploy. The price is unchanged — the
+deadline becomes an artifact that must be scheduled loudly and swept for (rules c and d there). If you
+won't build the sweep, stay with `await`: a silently missing deadline is strictly worse than a
+versioning headache, because the versioning failure is visible and the missing timer is not.
 
 ## The pattern
 
@@ -238,7 +257,9 @@ outcome rather than three.
 
 **Lifetime**: open while waiting on the deadline, closed once the outcome is settled. A later event on a
 settled aggregate starts a fresh run that reloads from the database — which is why persistence is not
-optional even though the run usually holds the state in memory.
+optional even though the run usually holds the state in memory. Under post-deadline monitoring,
+"settled" never means "done listening": the run closes whenever it is quiet, and the next event — next
+week or next year — starts a fresh run that reloads and re-evaluates.
 
 ### Why `settle()` exists
 
@@ -301,9 +322,14 @@ constraint on that key — not as concurrency control, but as an assertion that 
 activity retries still happen after a call succeeded remotely and failed to acknowledge. Pass a stable key
 (`aggregateKey + definitionVersion`) and have the remote system deduplicate on it.
 
-**9. Terminal is sticky.** Once the outcome is final, every later run must load that state and no-op —
-hence the check immediately after `loadState`. This is what makes "the decision is final" hold against an
-event arriving the day after the deadline.
+**9. Terminal is sticky — so decide explicitly what is terminal.** Once an outcome is final, every later
+run must load that state and no-op — hence the check immediately after `loadState`. This is what makes
+"the decision is final" hold against an event arriving the day after the deadline. But *which* states are
+final is a business decision, not a mechanical one. Under post-deadline monitoring, **"kept/complete" is
+not terminal**: a later event that breaks the aggregate must still revert the effect. Then answer the
+follow-up question: can a reverted effect be re-applied if the aggregate is later restored? If no,
+"reverted" is the one sticky state. If yes, nothing is terminal and every run is simply
+load → fold → evaluate → act idempotently — rule 8 is what makes that safe.
 
 **10. Fire the effect before checking the target.** If every member arrives in one batch, the first drain
 produces an already-complete aggregate; a completeness check placed first would skip the initial effect
@@ -403,9 +429,12 @@ None of this touches the aggregate workflow. Only the path into it grows.
 
 ## Alternative: move the deadline into a timer workflow
 
-**Choose this only if** you deploy the worker frequently — weekly or more — and won't adopt worker
-versioning. The aggregate workflow then closes after every event instead of parking, so no run is ever
-long enough to span a deploy and rule 12 stops applying.
+**Choose this if** you deploy the worker frequently — weekly or more — and won't adopt worker
+versioning, **or if the aggregate is monitored past the deadline** (see
+[Where the deadline lives](#where-the-deadline-lives)) — there the fresh-run reload path is the
+permanent mode anyway, so making it the only path is the simpler system. The aggregate workflow then
+closes after every event instead of parking, so no run is ever long enough to span a deploy and rule 12
+stops applying.
 
 The shape: when the effect is applied, an activity starts a one-shot `dl-<key>` workflow with
 `setStartDelay` set to the deadline. It wakes up, signals the aggregate, and finishes. The aggregate
@@ -437,6 +466,16 @@ exactly like a healthy waiting aggregate. Never catch-and-log that activity.
 **d. Add a sweep as a safety net.** Because of (c), run a low-frequency scheduled workflow — daily is
 ample for a 60-day deadline — that queries `WHERE deadline < now() AND state = 'WAITING'` and wakes those
 aggregates. It costs almost nothing and converts the silent failure mode into a bounded delay.
+
+**e. Discriminate the timer id per window.** If a key can enter the window at most once, `dl-<key>` is
+fine. If the effect can be reverted and later re-applied — a second window for the same key — plain
+`dl-<key>` with `REJECT_DUPLICATE` refuses the second timer while the first (closed) run is still within
+namespace retention, and the new window silently has no deadline — exactly the failure mode of (c). Use
+`dl-<key>-<deadlineEpoch>` instead: each window gets its own id, scheduling stays idempotent per window
+(a retry of the scheduling activity hits *already started* and is a no-op), and no reuse-policy subtlety
+exists. A stale timer from an old window firing late is harmless by (a). The wake it sends must be
+`signalWithStart` on `agg-<key>`, never a plain start — if the grace expires while a run is already open
+processing an event burst, `signalWithStart` merges the doorbell into that run; a plain start would fail.
 
 ### Migrating from the `await` shape
 
@@ -508,6 +547,8 @@ Use `TestWorkflowEnvironment` with skipped time — see
 | **Deadline expiry** | Advance past the deadline → `revertEffect` once, terminal, run closed. |
 | **Late arrival** | A member after the terminal outcome → new run loads terminal state, calls nothing. |
 | **Break after target met** | Reach the target (run closes), then remove a required member → fresh run reloads, reverts once. |
+| **Post-deadline break** | Complete, deadline long past, then a required member is removed → fresh run reloads and reverts once — "kept" is not terminal. |
+| **Second window** | Where re-application is allowed: revert, then restore membership → effect re-applies once, a second timer schedules successfully (variant rule e), and the new deadline is honored. |
 | **Stale event** | Replay an old event with a lower version → dropped, state unchanged. |
 | **Reload fidelity** | A run started by the 5th event reconstructs what the 4th persisted, including per-member versions. |
 | **continueAsNew mid-wait** | Force it → deadline still measured from the original instant. |
